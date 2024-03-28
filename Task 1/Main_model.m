@@ -31,30 +31,31 @@ pilotCarriers = [pilotCarriers,allCarriers(end)]; % поднесущие пил�
 P=P+1;
 
 dataCarriers = allCarriers(~ismember(allCarriers, pilotCarriers));
-OFDM_symbols = OFDM_symbol(TX_IQ, N_carrier, N_symb, Nfft, dataCarriers, pilotCarriers);
+OFDM_mapped_carriers = OFDM_symbol(TX_IQ, N_carrier, N_symb, Nfft, dataCarriers, pilotCarriers);
 
 %% 4. OFDM-модуляция: переход во временную область + добавление CP
-Tx_OFDM_Signal_matrix = OFDM_modulator(OFDM_symbols, T_Guard); % lab 2
+Tx_OFDM_Signal_matrix = OFDM_modulator(OFDM_mapped_carriers, T_Guard); % lab 2
 
-% Tx_OFDM_Signal=Tx_OFDM_Signal_matrix(:);
+Tx_OFDM_Signal=Tx_OFDM_Signal_matrix(:);
 
 %% 5.0 Временная рассинхронизация
-% nSTO = 0;
+nSTO = 0;
 % nSTO = 1;                % рассинхронизация на 1 отсчёт
 % nSTO = T_Guard/2;      % рассинхронизация на T_Guard/2 отсчётов
-nSTO = -T_Guard+1;        % рассинхронизация на T_Guard отсчётов
-Tx_OFDM_Signal=add_STO(Tx_OFDM_Signal_matrix(:),nSTO);
+% nSTO = -T_Guard+1;        % рассинхронизация на T_Guard отсчётов
+% Tx_OFDM_Signal=add_STO(Tx_OFDM_Signal_matrix(:),nSTO);
 
 %% 5. Канал
 %SNR_dB = 25;
 %[Rx_OFDM_Signal,~] = Noise(SNR_dB, Tx_OFDM_Signal);
-% figure();
+figure();
+plot(abs(fft(Tx_OFDM_Signal_matrix(:,1),Nfft,1)), 'LineWidth', 2);
 % plot(mean(abs(fft(Tx_OFDM_Signal_matrix,Nfft,1)),2), 'LineWidth', 2);
-% xlabel('Номер отсчёта');
-% ylabel('Амплитуда')
-% grid on
-% set(gca, 'Fontsize', 20)
-% title('АЧХ OFDM сигнала')
+xlabel('Номер отсчёта');
+ylabel('Амплитуда')
+grid on
+set(gca, 'Fontsize', 20)
+title('АЧХ OFDM сигнала')
 
 Rx_OFDM_Signal = Tx_OFDM_Signal;
 
@@ -62,11 +63,11 @@ Rx_OFDM_Signal = Tx_OFDM_Signal;
 Rx_OFDM_Signal =  reshape(Rx_OFDM_Signal,[Nfft+T_Guard, N_symb]);
 
 %% 7. OFDM-Демодуляция: удаление CP + переход в частотную область - получение точек созвездия
-RX_OFDM_symbols = OFDM_demodulator(Rx_OFDM_Signal, T_Guard);
+RX_OFDM_mapped_carriers = OFDM_demodulator(Rx_OFDM_Signal, T_Guard);
 
 figure();
 % plot(mean(abs(RX_OFDM_symbols),2), 'LineWidth', 2);
-plot(abs(RX_OFDM_symbols(:,1)), 'LineWidth', 2);
+plot(abs(RX_OFDM_mapped_carriers(:,1)), 'LineWidth', 2);
 xlabel('Номер отсчёта');
 ylabel('Амплитуда')
 xlim([1,Nfft])
@@ -75,7 +76,7 @@ set(gca, 'Fontsize', 20)
 title_name = "АЧХ OFDM сигнала на этапе получения точек созвездия (рассинхронизация на " + num2str(nSTO) +" отсчётов)";
 title(title_name)
 
-RX_IQ = get_payload(RX_OFDM_symbols,dataCarriers,N_carrier);
+RX_IQ = get_payload(RX_OFDM_mapped_carriers,dataCarriers,N_carrier);
 
 RX_IQ = RX_IQ(:).';
 
