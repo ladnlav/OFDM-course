@@ -25,7 +25,7 @@ amount_data_carriers = length(dataCarriers);
 
 File = 'eagle.tiff';
 Constellation = "16QAM";
-[~,bps] = constellation_func(Constellation); % bps - bits per symbol - битов на один символ созвездия
+[dict,bps] = constellation_func(Constellation); % bps - bits per symbol - битов на один символ созвездия
 
 %% 1. Чтение файла
 Size_Buffer = Amount_ODFM_SpF*Amount_OFDM_Frames*amount_data_carriers*bps;
@@ -50,7 +50,7 @@ for i = 1:Amount_OFDM_Frames
 end
 sc_bits = sc_bits_matrix(:).';
 %% 2. Mapping
-[TX_IQ,dict] = mapping(input_bits,Constellation);
+[TX_IQ,_] = mapping(input_bits,Constellation);
 [sc_TX_IQ,pad] = mapping(sc_bits,Constellation);
 
 %% 3. Формирование полосы

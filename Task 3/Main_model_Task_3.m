@@ -10,24 +10,38 @@ Amount_OFDM_Frames = 10;
 Amount_ODFM_SpF = 5;
 N_symb=Amount_OFDM_Frames*Amount_ODFM_SpF;
 
+% Параметры полосы
+Percent_pilot = 1;
+
+allCarriers = linspace(1,Nfft,Nfft); % индексы поднесущих
+amount_pilots = round(Percent_pilot/100*N_carrier);   % кол-во пилотов на всех Nfft отсчётах
+pilot_step = floor(N_carrier/amount_pilots);
+pilotCarriers = allCarriers(1:pilot_step:N_carrier-2);
+pilotCarriers = [pilotCarriers,allCarriers(N_carrier)];
+amount_pilots = length(pilotCarriers);
+
+dataCarriers = allCarriers(~ismember(allCarriers(1:N_carrier), pilotCarriers));
+amount_data_carriers = length(dataCarriers);
+
+
 File = 'eagle.tiff';
 Constellation = "16QAM";
-[~,bps] = constellation_func(Constellation); % bps - bits per symbol - битов на один символ созвездия
+[dict,bps] = constellation_func(Constellation); % bps - bits per symbol - битов на один символ созвездия
 
 %% 1. Чтение файла
-Size_Buffer = Amount_ODFM_SpF*Amount_OFDM_Frames*N_carrier*bps;
+Size_Buffer = Amount_ODFM_SpF*Amount_OFDM_Frames*amount_data_carriers*bps;
 input_bits = file_reader(File, Size_Buffer);
 
 %% 2. Scrambling
 % Scrambling
 Register = [1 0 0 1 0 1 0 1 0 0 0 0 0 0 0];
-sc_bits_matrix=zeros(Amount_ODFM_SpF*N_carrier*bps,Amount_OFDM_Frames);
+sc_bits_matrix=zeros(Amount_ODFM_SpF*amount_data_carriers*bps,Amount_OFDM_Frames);
 
 % Для каждого нового OFDM кадра сбрасывать состояние регистра РСЛОС до
 % начального
 for i = 1:Amount_OFDM_Frames
-    start_index = (i-1)*Amount_ODFM_SpF*N_carrier*bps+1;
-    end_index = i*Amount_ODFM_SpF*N_carrier*bps;
+    start_index = (i-1)*Amount_ODFM_SpF*amount_data_carriers*bps+1;
+    end_index = i*Amount_ODFM_SpF*amount_data_carriers*bps;
     
     if i == Amount_OFDM_Frames
         sc_bits_matrix(:,i) = Scrambler(Register, input_bits(start_index:end));
@@ -40,19 +54,13 @@ sc_bits = sc_bits_matrix(:).';
 [TX_IQ,pad] = mapping(sc_bits,Constellation);
 
 %% 3. Формирование полосы
-allCarriers = linspace(1,Nfft,Nfft); % индексы поднесущих
-P = 32;                   % кол-во пилотов
-pilotValue = 3+3j ;        % пилотное значение
+max_amplitude = max(abs(dict));
+amp_pilots = 2*max_amplitude ;        % пилотное значение
 
-pilotCarriers = allCarriers(1:round(Nfft/(P)):end);
-pilotCarriers = [pilotCarriers,allCarriers(end)]; % поднесущие пилотных сигналов
-P=P+1;
-
-dataCarriers = allCarriers(~ismember(allCarriers, pilotCarriers));
-OFDM_symbols = OFDM_symbol(TX_IQ, N_carrier, N_symb, Nfft, dataCarriers, pilotCarriers);
+OFDM_mapped_carriers = OFDM_map_carriers(TX_IQ, N_symb, Nfft, dataCarriers, pilotCarriers,amp_pilots);
 
 %% 4. OFDM-модуляция: переход во временную область + добавление CP
-Tx_OFDM_Signal_matrix = OFDM_modulator(OFDM_symbols, T_Guard);
+Tx_OFDM_Signal_matrix = OFDM_modulator(OFDM_mapped_carriers, T_Guard);
 
 Tx_OFDM_Signal=Tx_OFDM_Signal_matrix(:);
 %% 5. Расчёт PAPR
@@ -125,7 +133,7 @@ Rx_OFDM_Signal =  reshape(Rx_OFDM_Signal,[Nfft+T_Guard, N_symb]);
 %% 8. OFDM-Демодуляция: удаление CP + переход в частотную область - получение точек созвездия
 RX_OFDM_symbols = OFDM_demodulator(Rx_OFDM_Signal, T_Guard);
 
-RX_IQ = get_payload(RX_OFDM_symbols,dataCarriers,N_carrier);
+RX_IQ = get_payload(RX_OFDM_symbols,dataCarriers);
 RX_IQ = RX_IQ(:).';
 
 scatterplot(RX_IQ(1:400));
@@ -135,13 +143,13 @@ scatterplot(RX_IQ(1:400));
 output_bits = demapping(pad, RX_IQ, Constellation);
 
 %% 10. DeScrambler
-dsc_bits_matrix=zeros(Amount_ODFM_SpF*N_carrier*bps,Amount_OFDM_Frames);
+dsc_bits_matrix=zeros(Amount_ODFM_SpF*amount_data_carriers*bps,Amount_OFDM_Frames);
 
 % Для каждого нового OFDM кадра сбрасывать состояние регистра РСЛОС до
 % начального
 for i = 1:Amount_OFDM_Frames
-    start_index = (i-1)*Amount_ODFM_SpF*N_carrier*bps+1;
-    end_index = i*Amount_ODFM_SpF*N_carrier*bps;
+    start_index = (i-1)*Amount_ODFM_SpF*amount_data_carriers*bps+1;
+    end_index = i*Amount_ODFM_SpF*amount_data_carriers*bps;
     
     if i == Amount_OFDM_Frames
         dsc_bits_matrix(:,i) = DeScrambler(Register, output_bits(start_index:end));
@@ -175,18 +183,18 @@ for i=1:length(SNRs)
 
     RX_OFDM_symbols = OFDM_demodulator(Rx_OFDM_Signal, T_Guard);
 
-    RX_IQ = get_payload(RX_OFDM_symbols,dataCarriers,N_carrier);
+    RX_IQ = get_payload(RX_OFDM_symbols,dataCarriers);
     RX_IQ = RX_IQ(:).';
     
     output_bits = demapping(pad, RX_IQ, Constellation);
 
-    dsc_bits_matrix=zeros(Amount_ODFM_SpF*N_carrier*bps,Amount_OFDM_Frames);
+    dsc_bits_matrix=zeros(Amount_ODFM_SpF*amount_data_carriers*bps,Amount_OFDM_Frames);
 
     % Для каждого нового OFDM кадра сбрасывать состояние регистра РСЛОС до
     % начального
     for j = 1:Amount_OFDM_Frames
-        start_index = (j-1)*Amount_ODFM_SpF*N_carrier*bps+1;
-        end_index = j*Amount_ODFM_SpF*N_carrier*bps;
+        start_index = (j-1)*Amount_ODFM_SpF*amount_data_carriers*bps+1;
+        end_index = j*Amount_ODFM_SpF*amount_data_carriers*bps;
         
         if j == Amount_OFDM_Frames
             dsc_bits_matrix(:,j) = DeScrambler(Register, output_bits(start_index:end));
@@ -207,122 +215,3 @@ ylabel('BER');
 set(gca, 'Fontsize', 20)
 %legend('Обычный сигнал','Location','southeast');
 title('BER(SNR)');
-%% Функции
-
-% Прочитать файл
-function input_bits = file_reader(File, Size_Buffer)
-    % Прочитать черно-белую картинку
-    grayImage=imread(File);
-    
-    % Перевести картинку в битовый формат
-    binaryImage = imbinarize(grayImage);
-    input_bits = double(binaryImage); % из логического массива в массив 0 и 1
-
-    % Взять нужное количество бит из всей картинки
-    input_bits = input_bits(1:Size_Buffer);
-    
-end
-% Отобразить картинку
-function display_pic(binaryImage)
-    
-    % Добиваем до 360*360 битов нулями
-    padAmount = 360*360-size(binaryImage,2);
-    binaryImage=padarray(binaryImage, [0,padAmount], 0,'post');
-
-    % Делаем из колбасы матрицу - картинку
-    binaryImage=reshape(binaryImage,360,360);
-
-    % Перевести картинку в обычный формат
-    grayImage2 = uint8(binaryImage) * 255;
-    
-    % отобразить картинку
-    imshow(grayImage2);
-end
-% Распределить данные по поднесущим 
-function matrix=OFDM_symbol(QAM_payload, N_carrier, N_symb, Nfft, dataCarriers, pilotCarriers) 
-    symbols = zeros(Nfft, N_symb);
-    data =  reshape(QAM_payload.',[N_carrier, N_symb]);
-    
-    symbols(dataCarriers(1:N_carrier),:)=data;
-    symbols(pilotCarriers,:)=0+0j;
-
-    matrix = symbols;
-end
-% Создать OFDM-symbol во времени
-function OFDM_time_guarded=OFDM_modulator(OFDM_symbols, T_guard) 
-    
-    % IFFT
-    OFDM_time = ifft(OFDM_symbols,[],1);
-    
-    % Добавить cp
-    cp = OFDM_time(end-T_guard+1:end,:);  % take the last CP samples
-    OFDM_time_guarded = [cp; OFDM_time];
-
-end
-% Переход OFDM-symbol в частотную область
-function TX_IQ=OFDM_demodulator(OFDM_time_guarded, T_guard) 
-    
-    % Удалть cp 
-    OFDM_time = OFDM_time_guarded(T_guard+1:end,:); % take the last samples without CP samples
-
-    % FFT
-    TX_IQ = fft(OFDM_time,[],1);
-
-end
-% Извлечь данные из OFDM-символов
-function RX_IQ=get_payload(RX_OFDM_symbols, dataCarriers, N_carrier) 
-    RX_IQ=RX_OFDM_symbols(dataCarriers(1:N_carrier),:);
-end
-
-% Расчитать PAPR
-function PAPR = calculatePAPR(OFDM_signal)    
-    % Поиск квадрата максимальной амплитуды
-    peak_power = max(abs(OFDM_signal))^2;
-    
-    % Нахождение средней мощности сигнала
-    average_power = mean(abs(OFDM_signal).^2);
-    
-    % Расчёт PAPR
-    PAPR = 10*log10(peak_power / average_power);
-end
-
-% Рассчитать оконный PAPR
-function PAPRs = calculate_window_PAPR(Tx_OFDM_Signal,Nfft)    
-    % Сколько всего будет значений PAPR для данного сигнала
-    n_PAPRs=length(Tx_OFDM_Signal) - Nfft + 1;
-    PAPRs = zeros(1, n_PAPRs);
-
-    % Цикл расчёта PAPR скользящим окном
-    for i = 1:n_PAPRs
-            % Извлечь отсчёты в окне 
-            window = Tx_OFDM_Signal(i:i+Nfft-1);
-            
-            % Рассчитать PAPR для текущего окна
-            PAPRs(i) = calculatePAPR(window);
-    end
-end
-% Рассчитать CCDF
-function [PAPR_ccdf, CCDF] = calculateCCDF(PAPR_values)
-    
-    [CCDF,PAPR_ccdf] = ecdf(PAPR_values);
-    CCDF = 1 - CCDF;
-end
-% Рассчитать канальную характеристику при многолучевом распространении
-function [impulse_response,frequency_response] = get_MP_channel_resp(channel_taps, Nfft)
-    % Вычислить максимальную задержку среди всех лучей
-    max_delay = max(channel_taps(:, 1));
-    impulse_response_length = max_delay + 1;
-
-    % Инициализация массива с импульсной характеристикой канала
-    impulse_response = zeros(1, impulse_response_length);
-
-    % Создание массива с импульсной характеристикой канала
-    for i = 1:size(channel_taps, 1)
-        delay = channel_taps(i, 1);
-        amplitude = channel_taps(i, 2);
-        impulse_response(delay + 1) = amplitude;
-    end
-
-    % Вычислим частотную характеристику канала для будущих сравнений
-    frequency_response = fft(impulse_response, Nfft);
-end
