@@ -17,7 +17,7 @@ end
 
 function xor_result = array_xor(Register)
     
-    coeff_mask=[1 1 1 1 1 1 0 0 1 1 0 0 0 0 1]; % 77141 (oct) in bits
+    coeff_mask=[1 0 0 0 0 0 0 0 0 0 0 0 0 1 1]; % was 77141 (oct) in bits
     xor_in=Register(logical(coeff_mask(2:end)));
 
     xor_result = xor_in(1);
