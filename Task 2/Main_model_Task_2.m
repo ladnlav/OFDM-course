@@ -33,7 +33,7 @@ input_bits = file_reader(File, Size_Buffer);
 
 %% 2. Scrambling
 % Scrambling
-Register = [1 0 0 1 0 1 0 1 0 0 0 0 1 0 0];
+Register = [1 0 0 1 0 1 0 1 0 0 0 0 0 0 0];
 sc_bits_matrix=zeros(Amount_ODFM_SpF*amount_data_carriers*bps,Amount_OFDM_Frames);
 
 % Для каждого нового OFDM кадра сбрасывать состояние регистра РСЛОС до
@@ -50,7 +50,7 @@ for i = 1:Amount_OFDM_Frames
 end
 sc_bits = sc_bits_matrix(:).';
 %% 2. Mapping
-[TX_IQ,_] = mapping(input_bits,Constellation);
+[TX_IQ,~] = mapping(input_bits,Constellation);
 [sc_TX_IQ,pad] = mapping(sc_bits,Constellation);
 
 %% 3. Формирование полосы
