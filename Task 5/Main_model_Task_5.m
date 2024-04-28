@@ -3,21 +3,23 @@ close all; % закрыть дополнительные окна
 clear all; % очистить память
 rng(1); % фиксирование начального состояния генератора случайных чисел Матлаба
 %% 0. Параметры OFDM
-Nfft = 1024;
-N_carrier = 400;
+Nfft = 4096;
+N_carrier = 1024;
 T_Guard = Nfft /8;
-Amount_OFDM_Frames = 10;
-Amount_ODFM_SpF = 5;
+Amount_OFDM_Frames = 2;
+Amount_ODFM_SpF = 7;
 N_symb=Amount_OFDM_Frames*Amount_ODFM_SpF;
-
-
-% Параметры полосы
-pilot_step = 2; % comb
+verbose = 1; % 1 - display plots, 0 - silence mode
+reg_pilot = 1; % 1 - regular pilot mask, 0 - random pilot mask
+comb=1;
+SNR_dB = 20;
 
 allCarriers = linspace(1,Nfft,Nfft); % индексы поднесущих
+pilot_step = comb; % comb
+%Регулярные пилоты
 amount_pilots = floor(N_carrier/pilot_step);   % кол-во пилотов на всех Nfft отсчётах
-% pilot_step = floor(N_carrier/amount_pilots);
 pilotCarriers = allCarriers(1:pilot_step:N_carrier);
+amount_pilots = length(pilotCarriers);
 
 if pilot_step == 1
     Percent_pilot = 100;
@@ -25,13 +27,12 @@ if pilot_step == 1
     allCarriers = linspace(1,Nfft,Nfft); % индексы поднесущих
     amount_pilots = round(Percent_pilot/100*N_carrier);   % кол-во пилотов на всех Nfft отсчётах
     pilot_step = floor(N_carrier/amount_pilots);
-    pilotCarriers = allCarriers(1:pilot_step:N_carrier-2);
+    pilotCarriers = allCarriers(1:pilot_step:N_carrier-1);
     pilotCarriers = [pilotCarriers,allCarriers(N_carrier)];
     amount_pilots = length(pilotCarriers);
 end
 dataCarriers = allCarriers(~ismember(allCarriers(1:N_carrier), pilotCarriers));
 amount_data_carriers = length(dataCarriers);
-
 
 File = 'eagle.tiff';
 Constellation = "16QAM";
@@ -41,9 +42,10 @@ Constellation = "16QAM";
 max_amplitude = max(abs(dict));
 amp_pilots = 4/3*max_amplitude ;        % пилотное значение
 pilotValues = zeros(1,length(pilotCarriers));
-pilotValues(1:2:end) = amp_pilots*exp(1i*0);
-pilotValues(2:2:end) = amp_pilots*exp(1i*pi);
+pilotValues(1:end) = amp_pilots*exp(1i*0);
 pilotValues = repmat(pilotValues', 1, N_symb);
+
+if comb ~= 1
 %% 1. Чтение файла
 Size_Buffer = Amount_ODFM_SpF*Amount_OFDM_Frames*amount_data_carriers*bps;
 input_bits = file_reader(File, Size_Buffer);
@@ -66,12 +68,17 @@ for i = 1:Amount_OFDM_Frames
     end
 end
 sc_bits = sc_bits_matrix(:).';
+
 %% 2. Mapping
 [TX_IQ,pad] = mapping(sc_bits,Constellation);
 
 %% 3. Формирование полосы
 OFDM_mapped_carriers = OFDM_map_carriers(TX_IQ, N_symb, Nfft, dataCarriers,pilotCarriers, pilotValues);
 
+else
+    OFDM_mapped_carriers = zeros(Nfft,N_symb);
+    OFDM_mapped_carriers(pilotCarriers,:) = pilotValues;
+end
 %% 4. OFDM-модуляция: переход во временную область + добавление CP
 Tx_OFDM_Signal_matrix = OFDM_modulator(OFDM_mapped_carriers, T_Guard);
 
@@ -168,12 +175,23 @@ if mp_desync
 %     title('Channel Estimation');
 %     hold off;
     
-    H_est_LS_l = LS_CE(RX_OFDM_mapped_carriers,pilotValues,pilotCarriers,Nfft);
-    H_est_MMSE = MMSE_CE(RX_OFDM_mapped_carriers,pilotValues,pilotCarriers,Nfft,H_tau,SNR_dB);
-    [H_est_MP, h_t_MP] =  MP_estimate(RX_OFDM_mapped_carriers, pilotCarriers, Nfft,N_carrier, length(channel_taps));
-    [H_est_OMP,h_t_OMP,kk1] =  OMP_estimate(RX_OFDM_mapped_carriers, pilotCarriers, Nfft,N_carrier, length(channel_taps));
-%     [x,kk2] =  OMP2(RX_OFDM_mapped_carriers, pilotCarriers, Nfft,N_carrier, length(channel_taps));
-    %     [h_t_s, h_f_s] = OMPForEach(RX_OFDM_mapped_carriers, Nfft, pilotCarriers, length(channel_taps));
+    H_est_LS_l = LS_CE(RX_OFDM_mapped_carriers,pilotValues,pilotCarriers,N_carrier);
+    h_t_mmse = ifft(H_est_LS_l);
+    H_est_MMSE = MMSE_CE(RX_OFDM_mapped_carriers,pilotValues,pilotCarriers,Nfft,N_carrier,h_t_mmse,SNR_dB);
+    %Данные для MP/OMP
+    F = dftmtx(Nfft);
+    if reg_pilot
+        F = F(:,1:ceil(N_carrier/comb));
+    end
+    P = zeros(amount_pilots, Nfft);
+    for i=1:amount_pilots
+        P(i,pilotCarriers(i)) = 1;
+    end
+    sensing_matrix = P*F;
+    Y = RX_OFDM_mapped_carriers(pilotCarriers,1)/amp_pilots;
+    
+    [H_est_MP, h_t_MP] = MP_estimate(Y, sensing_matrix, Nfft,size(channel_taps,1));
+    [H_est_OMP,h_t_OMP,kk1] =  OMP_estimate(Y, sensing_matrix, Nfft, size(channel_taps,1),SNR_dB);
 
     H_freq_useful = H_freq(1:N_carrier);
     H_est_LS_l_useful = H_est_LS_l(1:N_carrier);
@@ -225,11 +243,12 @@ if mp_desync
     legend('True Channel','MP','OMP');
     RX_OFDM_mapped_carriers = equalize_signal(RX_OFDM_mapped_carriers, H_est, N_carrier);
 end
+if pilot_step ~= 1
 %% 8.9 Получение точек созвездия
 RX_IQ = get_payload(RX_OFDM_mapped_carriers,dataCarriers);
 RX_IQ = RX_IQ(:).';
 
-scatterplot(RX_IQ(length(dataCarriers)+1:length(dataCarriers)+332));
+% scatterplot(RX_IQ(length(dataCarriers)+1:length(dataCarriers)+332));
 % здесь видно, что "нулевые" поднесущие берут на себя часть мощности АБГШ
 % scatterplot(RX_OFDM_mapped_carriers(1:400)); 
 %% 9. Demapping
@@ -264,3 +283,78 @@ MER = MER_func(RX_IQ,Constellation);
 % Разница в MER и SNR вызвана тем, что шум накладывается на сигнал с CP, а
 % MER рассчитывается по сигналу уже без CP
 disp("При значениии SNR=" +num2str(SNR_dB)+" dB; "+" MER="+num2str(MER)+" dB; "+ "BER="+ num2str(BER));
+
+end
+%% Исследование различных методов оценки канала (часть-1)
+% Многолучевое распространение
+channel_taps = [
+    0, 1;   % (delay, amplitude)
+    4, 0.8;
+    10, 0.6;
+    15, 0.4;
+    21, 0.2;
+    25, 0.1;
+];
+
+% Получаем импульсную и частотную характеристики для заданной конфигурации
+% лучей
+[H_tau, H_freq] = get_MP_channel_resp(channel_taps, Nfft);
+
+SNRs=(0:0.5:30);
+MSEs=zeros(4,length(SNRs)); % LS, MMSE, MP, OMP
+for i=1:length(SNRs)
+    SNR_dB = SNRs(i);
+    % АБГШ
+    [Rx_OFDM_Signal,~] = Noise(SNR_dB, Tx_OFDM_Signal);
+     % Прохождение через многолучевой канал
+    Rx_OFDM_Signal = conv(Rx_OFDM_Signal,H_tau.',"full");
+    Rx_OFDM_Signal = Rx_OFDM_Signal(1:end-length(H_tau)+1);
+
+    Rx_OFDM_Signal =  reshape(Rx_OFDM_Signal,[Nfft+T_Guard, N_symb]);
+    RX_OFDM_mapped_carriers = OFDM_demodulator(Rx_OFDM_Signal, T_Guard);
+    
+    
+    H_est_LS_l = LS_CE(RX_OFDM_mapped_carriers,pilotValues,pilotCarriers,N_carrier);
+    h_t_mmse = ifft(H_est_LS_l);
+    H_est_MMSE = MMSE_CE(RX_OFDM_mapped_carriers,pilotValues,pilotCarriers,Nfft,N_carrier,h_t_mmse,SNR_dB);
+    %Данные для MP/OMP
+    F = dftmtx(Nfft);
+    if reg_pilot
+        F = F(:,1:ceil(N_carrier/comb));
+    end
+    P = zeros(amount_pilots, Nfft);
+    for hh=1:amount_pilots
+        P(hh,pilotCarriers(hh)) = 1;
+    end
+    sensing_matrix = P*F;
+    Y = RX_OFDM_mapped_carriers(pilotCarriers,1)/amp_pilots;
+    
+    [H_est_MP, h_t_MP] = MP_estimate(Y, sensing_matrix, Nfft, size(channel_taps,1));
+    [H_est_OMP,h_t_OMP,kk1] =  OMP_estimate(Y, sensing_matrix, Nfft, size(channel_taps,1),SNR_dB);
+
+    
+    H_freq_useful = H_freq(1:N_carrier);
+    H_est_LS_l_useful = H_est_LS_l(1:N_carrier);
+    H_est_MMSE_useful = H_est_MMSE(1:N_carrier);
+    H_est_MP_useful = H_est_MP(1:N_carrier);
+    H_est_OMP_useful = H_est_OMP(1:N_carrier);
+    
+    MSEs(1,i) = (H_freq_useful-H_est_LS_l_useful)*(H_freq_useful-H_est_LS_l_useful)'/N_carrier; %LS
+    MSEs(2,i) = (H_freq_useful-H_est_MMSE_useful)*(H_freq_useful-H_est_MMSE_useful)'/N_carrier; %MMSE
+    MSEs(3,i) = (H_freq_useful-H_est_MP_useful)*(H_freq_useful-H_est_MP_useful)'/N_carrier; %MP
+    MSEs(4,i) = (H_freq_useful-H_est_OMP_useful)*(H_freq_useful-H_est_OMP_useful)'/N_carrier; %OMP
+end
+figure();
+for i=1:size(MSEs,1)
+    plot(SNRs, MSEs(i,:), 'LineWidth', 2);
+    hold on;
+end
+grid on;
+xlabel('SNR (dB)');
+ylabel('MSE');
+set(gca, 'Fontsize', 20)
+legend("LS", "MMSE", "MP", "OMP", 'Location','northeast');
+title(strcat('MSE(SNR) for different channel estimation method',  '\newline',...
+    ' Nfft=', num2str(Nfft), ...
+    ' N\_carrier=',num2str(N_carrier), ...
+    ' comb=',num2str(pilot_step)));

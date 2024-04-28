@@ -1,17 +1,7 @@
 % MP оценка
-function [H_MP,h_impulse_est] = MP_estimate(Y, pilot_indices, Nfft, N_carrier,dominant_taps)
-Np = length(pilot_indices);
-comb = pilot_indices(3)-pilot_indices(2);
-
-h_impulse_est = zeros(Nfft,1);
-residue = Y(pilot_indices,1);
-F = dftmtx(Nfft); 
-F = F(:,1:ceil(Nfft/comb));
-P = zeros(Np, Nfft); 
-for i=1:Np
-    P(i,pilot_indices(i)) = 1;
-end
-sensing_matrix = P*F;
+function [H_MP,h_impulse_est] = MP_estimate(Y, sensing_matrix, Nfft,dominant_taps)
+Np = size(sensing_matrix,1);
+residue = Y;
 kp=zeros(1,dominant_taps);
 x = zeros(1, dominant_taps);
 
@@ -33,13 +23,12 @@ for i1 = 1:dominant_taps
     residue = residue - proj_kp*residue;
 end
 
-kp = sort(kp) - min(kp)+1;
+% kp = sort(kp) - min(kp)+1;
 h_impulse_est = zeros(Nfft,1);
 for i1 = 1:length(kp)
     h_impulse_est(kp(i1)) = x(i1);
 end
 
-
-h_impulse_est = h_impulse_est/1.7889;
+h_impulse_est = h_impulse_est;
 H_MP = fft(h_impulse_est).';
 end
