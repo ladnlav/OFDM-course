@@ -7,24 +7,21 @@ function [AutoCorr, TgPosition, FreqOffset] = AutoCorrFunction(RxSignal, WidthWi
   end
 
   % Поиск позиции защитного интервала с помощью порогового значения
-%   Threshold = 0.77;
-%   amp_AutoCorr = abs(AutoCorr);
-%   Threshold_idxs = find(amp_AutoCorr>Threshold);
-%   Threshold_idxs = Threshold_idxs(Threshold_idxs>WidthWindow);
-% 
-%   diffs = diff(Threshold_idxs);
-%   mask = [true, abs(diffs) ~= 1];
-%   result = find(mask);
-%   
-%   try 
-%     TgPosition=floor((Threshold_idxs(result(1))+Threshold_idxs(result(2)-1))/2);
-%   catch 
-%     warning('Проблема при нахождении позиции защитного интервала.');
-%     TgPosition = 65;
-%   end
+  Threshold = 0.77;
+  amp_AutoCorr = abs(AutoCorr);
+  Threshold_idxs = find(amp_AutoCorr>Threshold);
+  Threshold_idxs = Threshold_idxs(Threshold_idxs>WidthWindow);
+
+  diffs = diff(Threshold_idxs);
+  mask = [true, abs(diffs) ~= 1];
+  result = find(mask);
   
-  [~,TgPositions] = findpeaks(abs(AutoCorr),'Npeaks',200,'MinPeakHeight',0.90);
-  TgPosition = TgPositions(1);
+  try 
+    TgPosition=floor((Threshold_idxs(result(1))+Threshold_idxs(result(2)-1))/2);
+  catch 
+    warning('Не удалось определить позицию защитного интервала. Использовано стандартное значение.');
+    TgPosition = 65;
+  end
 
   % Оценка частотной рассинхронизации
   FreqOffset = -angle(AutoCorr(TgPosition))/(2*pi); 
